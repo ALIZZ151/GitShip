@@ -1,0 +1,37 @@
+{
+  "name": "alizz-gitship",
+  "version": "2.1.0",
+  "description": "CLI modern buat upload project ke GitHub dari folder atau file ZIP.",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "gitship": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node --check src/index.js"
+  },
+  "keywords": [
+    "github",
+    "deploy",
+    "cli",
+    "termux",
+    "zip",
+    "alizz",
+    "gitship"
+  ],
+  "author": "ALIZZ",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.3.2",
+    "adm-zip": "^0.5.16",
+    "boxen": "^8.0.1",
+    "chalk": "^5.4.1",
+    "figlet": "^1.8.0",
+    "gradient-string": "^3.0.0",
+    "ora": "^8.2.0"
+  }
+}
