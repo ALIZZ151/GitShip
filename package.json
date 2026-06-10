@@ -1,6 +1,6 @@
 {
   "name": "alizz-gitship",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "CLI modern buat upload project ke GitHub dari folder atau file ZIP.",
   "type": "module",
   "main": "src/index.js",
