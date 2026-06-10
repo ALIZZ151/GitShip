@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { input, password, select } from "@inquirer/prompts";
+import { input, password, select, confirm } from "@inquirer/prompts";
 import boxen from "boxen";
 import chalk from "chalk";
 import figlet from "figlet";
@@ -14,18 +14,15 @@ import process from "node:process";
 import { spawn } from "node:child_process";
 
 const APP_NAME = "ALIZZ GitShip";
-const APP_VERSION = "2.1.0";
+const APP_VERSION = "2.2.0";
 const DEVELOPER = "ALIZZ";
 
 const GITHUB_API = "https://api.github.com";
 const GITHUB_API_VERSION = "2022-11-28";
 const DEFAULT_NEW_REPO_BRANCH = "main";
+const CONFIG_DIR = path.join(os.homedir(), ".alizz-gitship");
+const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 
-/**
- * Default repo baru dibuat public.
- * Kalau mau repo baru selalu private, ubah true.
- * Ini bukan fitur baru, cuma default teknis saat create repository.
- */
 const NEW_REPO_PRIVATE = false;
 
 const theme = {
@@ -49,9 +46,7 @@ class AppError extends Error {
 }
 
 function clearScreen() {
-  if (process.stdout.isTTY) {
-    process.stdout.write("\x1Bc");
-  }
+  if (process.stdout.isTTY) process.stdout.write("\x1Bc");
 }
 
 function printBanner() {
@@ -69,9 +64,10 @@ function printBanner() {
     boxen(
       `${theme.white.bold(APP_NAME)} ${theme.muted(`v${APP_VERSION}`)}\n` +
         `${theme.gray("Upload project ke GitHub dari folder atau file ZIP.")}\n\n` +
-        `${theme.green("✓")} Update repo lama: replace isi repo target dengan project baru\n` +
+        `${theme.green("✓")} Login sekali, akun/token disimpan lokal di device\n` +
+        `${theme.green("✓")} Update repo lama: pilih repo dari list, tanpa paste link\n` +
         `${theme.green("✓")} Deploy repo baru: create repo baru lalu upload project\n` +
-        `${theme.green("✓")} Input gampang: bisa folder project atau file .zip\n\n` +
+        `${theme.green("✓")} Setelah selesai, balik ke menu utama\n\n` +
         `${theme.purple("Developer:")} ${theme.white.bold(DEVELOPER)}`,
       {
         padding: 1,
@@ -99,81 +95,31 @@ function printMiniInfo(lines) {
 }
 
 function normalizeInputPath(rawPath) {
-  return path.resolve(rawPath.trim().replace(/^['"]|['"]$/g, ""));
+  return path.resolve(rawPath.trim().replace(/^[']|[']$/g, "").replace(/^[\"]|[\"]$/g, ""));
 }
 
 function validateEmail(email) {
   const value = email.trim();
-
   if (!value) return "Email tidak boleh kosong.";
-
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-  if (!emailRegex.test(value)) {
-    return "Format email tidak valid.";
-  }
-
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return "Format email tidak valid.";
   return true;
 }
 
 function validateUsername(username) {
   const value = username.trim();
-
   if (!value) return "Username GitHub tidak boleh kosong.";
-
-  if (!/^[a-zA-Z0-9-]+$/.test(value)) {
-    return "Username GitHub hanya boleh berisi huruf, angka, dan strip.";
-  }
-
+  if (!/^[a-zA-Z0-9-]+$/.test(value)) return "Username GitHub hanya boleh berisi huruf, angka, dan strip.";
   return true;
 }
 
 function validateRepoName(name) {
   const value = name.trim();
-
   if (!value) return "Nama repo tidak boleh kosong.";
   if (value.length > 100) return "Nama repo terlalu panjang.";
-
-  if (!/^[a-zA-Z0-9._-]+$/.test(value)) {
-    return "Nama repo hanya boleh berisi huruf, angka, titik, underscore, dan strip.";
-  }
-
-  if (value === "." || value === "..") {
-    return "Nama repo tidak valid.";
-  }
-
-  if (value.endsWith(".git")) {
-    return "Masukkan nama repo tanpa akhiran .git.";
-  }
-
+  if (!/^[a-zA-Z0-9._-]+$/.test(value)) return "Nama repo hanya boleh berisi huruf, angka, titik, underscore, dan strip.";
+  if (value === "." || value === "..") return "Nama repo tidak valid.";
+  if (value.endsWith(".git")) return "Masukkan nama repo tanpa akhiran .git.";
   return true;
-}
-
-function parseGitHubRepoUrl(repoUrl) {
-  const value = repoUrl.trim();
-
-  const httpsMatch = value.match(
-    /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i
-  );
-
-  const sshMatch = value.match(
-    /^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i
-  );
-
-  const match = httpsMatch || sshMatch;
-
-  if (!match) {
-    throw new AppError(
-      "INVALID_REPO_URL",
-      "URL repository GitHub tidak valid.",
-      "Format yang benar: https://github.com/owner/repo.git atau git@github.com:owner/repo.git"
-    );
-  }
-
-  return {
-    owner: match[1],
-    repo: match[2].replace(/\.git$/i, "")
-  };
 }
 
 async function pathExists(targetPath) {
@@ -186,23 +132,8 @@ async function pathExists(targetPath) {
 
 async function ensureProjectPath(projectPath) {
   const stat = await pathExists(projectPath);
-
-  if (!stat) {
-    throw new AppError(
-      "PROJECT_NOT_FOUND",
-      "Folder/file project tidak ditemukan.",
-      projectPath
-    );
-  }
-
-  if (!stat.isDirectory() && !stat.isFile()) {
-    throw new AppError(
-      "PROJECT_NOT_SUPPORTED",
-      "Path project harus berupa folder atau file.",
-      projectPath
-    );
-  }
-
+  if (!stat) throw new AppError("PROJECT_NOT_FOUND", "Folder/file project tidak ditemukan.", projectPath);
+  if (!stat.isDirectory() && !stat.isFile()) throw new AppError("PROJECT_NOT_SUPPORTED", "Path project harus berupa folder atau file.", projectPath);
   return stat;
 }
 
@@ -213,29 +144,18 @@ function isZipFile(filePath) {
 async function extractZipSafely(zipPath, outputDir) {
   const zip = new AdmZip(zipPath);
   const entries = zip.getEntries();
-
-  if (!entries.length) {
-    throw new AppError("ZIP_EMPTY", "File ZIP kosong.", zipPath);
-  }
+  if (!entries.length) throw new AppError("ZIP_EMPTY", "File ZIP kosong.", zipPath);
 
   await fs.mkdir(outputDir, { recursive: true });
   const safeRoot = `${path.resolve(outputDir)}${path.sep}`;
 
   for (const entry of entries) {
     const entryName = entry.entryName.replace(/\\/g, "/");
-
-    if (!entryName || entryName.includes("\0")) {
-      continue;
-    }
+    if (!entryName || entryName.includes("\0")) continue;
 
     const targetPath = path.resolve(outputDir, entryName);
-
     if (!targetPath.startsWith(safeRoot)) {
-      throw new AppError(
-        "ZIP_UNSAFE_PATH",
-        "File ZIP punya path yang tidak aman, proses dibatalkan.",
-        entry.entryName
-      );
+      throw new AppError("ZIP_UNSAFE_PATH", "File ZIP punya path yang tidak aman, proses dibatalkan.", entry.entryName);
     }
 
     if (entry.isDirectory) {
@@ -255,11 +175,7 @@ function isJunkRootName(name) {
 async function detectProjectRoot(extractedDir) {
   const entries = await fs.readdir(extractedDir, { withFileTypes: true });
   const visibleEntries = entries.filter((entry) => !isJunkRootName(entry.name));
-
-  if (visibleEntries.length === 1 && visibleEntries[0].isDirectory()) {
-    return path.join(extractedDir, visibleEntries[0].name);
-  }
-
+  if (visibleEntries.length === 1 && visibleEntries[0].isDirectory()) return path.join(extractedDir, visibleEntries[0].name);
   return extractedDir;
 }
 
@@ -268,40 +184,24 @@ async function prepareProjectSource(rawProjectPath) {
   const stat = await ensureProjectPath(projectPath);
 
   if (!stat.isFile()) {
-    return {
-      sourcePath: projectPath,
-      originalPath: projectPath,
-      kind: "folder",
-      cleanup: async () => {}
-    };
+    return { sourcePath: projectPath, originalPath: projectPath, kind: "folder", cleanup: async () => {} };
   }
 
   if (!isZipFile(projectPath)) {
-    return {
-      sourcePath: projectPath,
-      originalPath: projectPath,
-      kind: "file",
-      cleanup: async () => {}
-    };
+    return { sourcePath: projectPath, originalPath: projectPath, kind: "file", cleanup: async () => {} };
   }
 
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "alizz-gitship-zip-"));
   const extractedDir = path.join(tempRoot, "extracted");
 
   try {
-    await withSpinner("Extract file ZIP project", async () => {
-      await extractZipSafely(projectPath, extractedDir);
-    });
-
+    await withSpinner("Extract file ZIP project", async () => extractZipSafely(projectPath, extractedDir));
     const sourcePath = await detectProjectRoot(extractedDir);
-
     return {
       sourcePath,
       originalPath: projectPath,
       kind: "zip",
-      cleanup: async () => {
-        await fs.rm(tempRoot, { recursive: true, force: true });
-      }
+      cleanup: async () => fs.rm(tempRoot, { recursive: true, force: true })
     };
   } catch (error) {
     await fs.rm(tempRoot, { recursive: true, force: true });
@@ -326,10 +226,7 @@ function runCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd || process.cwd(),
-      env: {
-        ...process.env,
-        ...(options.env || {})
-      },
+      env: { ...process.env, ...(options.env || {}) },
       shell: false,
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -337,67 +234,36 @@ function runCommand(command, args, options = {}) {
     let stdout = "";
     let stderr = "";
 
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
+    child.stdout.on("data", (chunk) => (stdout += chunk.toString()));
+    child.stderr.on("data", (chunk) => (stderr += chunk.toString()));
 
     child.on("error", (error) => {
       if (error.code === "ENOENT" && command === "git") {
-        reject(
-          new AppError(
-            "GIT_NOT_INSTALLED",
-            "Git belum terinstall atau belum masuk PATH.",
-            "Install Git dulu. Di Termux: pkg install git -y"
-          )
-        );
+        reject(new AppError("GIT_NOT_INSTALLED", "Git belum terinstall atau belum masuk PATH.", "Install Git dulu. Di Termux: pkg install git -y"));
         return;
       }
-
       reject(error);
     });
 
     child.on("close", (code) => {
       if (code === 0) {
-        resolve({
-          stdout: stdout.trim(),
-          stderr: stderr.trim()
-        });
+        resolve({ stdout: stdout.trim(), stderr: stderr.trim() });
         return;
       }
-
-      reject(
-        new AppError(
-          "COMMAND_FAILED",
-          `Command gagal: ${command} ${args.join(" ")}`,
-          stderr.trim() || stdout.trim()
-        )
-      );
+      reject(new AppError("COMMAND_FAILED", `Command gagal: ${command} ${args.join(" ")}`, stderr.trim() || stdout.trim()));
     });
   });
 }
 
 function getGitAuthArgs(token) {
   const basicToken = Buffer.from(`x-access-token:${token}`).toString("base64");
-
-  return [
-    "-c",
-    `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basicToken}`
-  ];
+  return ["-c", `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basicToken}`];
 }
 
 async function runGit(args, options = {}) {
-  const finalArgs = options.token
-    ? [...getGitAuthArgs(options.token), ...args]
-    : args;
-
+  const finalArgs = options.token ? [...getGitAuthArgs(options.token), ...args] : args;
   try {
-    return await runCommand("git", finalArgs, {
-      cwd: options.cwd
-    });
+    return await runCommand("git", finalArgs, { cwd: options.cwd });
   } catch (error) {
     throw mapGitError(error);
   }
@@ -407,38 +273,22 @@ function mapGitError(error) {
   const detail = `${error.detail || ""}\n${error.message || ""}`;
 
   if (/Authentication failed|could not read Username|403|denied|Invalid username or password/i.test(detail)) {
-    return new AppError(
-      "INVALID_TOKEN",
-      "Token GitHub tidak valid atau permission token kurang.",
-      detail
-    );
+    return new AppError("INVALID_TOKEN", "Token GitHub tidak valid atau permission token kurang.", detail);
   }
 
   if (/repository .* not found|Repository not found|not found/i.test(detail)) {
-    return new AppError(
-      "REPO_NOT_FOUND",
-      "Repository tidak ditemukan atau token tidak punya akses.",
-      detail
-    );
+    return new AppError("REPO_NOT_FOUND", "Repository tidak ditemukan atau token tidak punya akses.", detail);
   }
 
   if (/Could not resolve host|Failed to connect|timed out|Connection refused|network|unable to access/i.test(detail)) {
-    return new AppError(
-      "NETWORK_ERROR",
-      "Koneksi internet bermasalah atau GitHub tidak bisa diakses.",
-      detail
-    );
+    return new AppError("NETWORK_ERROR", "Koneksi internet bermasalah atau GitHub tidak bisa diakses.", detail);
   }
 
   return error;
 }
 
 async function withSpinner(text, action) {
-  const spinner = ora({
-    text,
-    spinner: "dots"
-  }).start();
-
+  const spinner = ora({ text, spinner: "dots" }).start();
   try {
     const result = await action();
     spinner.succeed(theme.green(text));
@@ -450,14 +300,11 @@ async function withSpinner(text, action) {
 }
 
 async function ensureGitInstalled() {
-  await withSpinner("Cek Git di device", async () => {
-    await runCommand("git", ["--version"]);
-  });
+  await withSpinner("Cek Git di device", async () => runCommand("git", ["--version"]));
 }
 
 async function githubApi(token, endpoint, options = {}) {
   let response;
-
   try {
     response = await fetch(`${GITHUB_API}${endpoint}`, {
       method: options.method || "GET",
@@ -470,15 +317,10 @@ async function githubApi(token, endpoint, options = {}) {
       body: options.body ? JSON.stringify(options.body) : undefined
     });
   } catch (error) {
-    throw new AppError(
-      "NETWORK_ERROR",
-      "Koneksi internet bermasalah atau GitHub API tidak bisa diakses.",
-      error.message
-    );
+    throw new AppError("NETWORK_ERROR", "Koneksi internet bermasalah atau GitHub API tidak bisa diakses.", error.message);
   }
 
   let data = null;
-
   try {
     data = await response.json();
   } catch {
@@ -488,91 +330,110 @@ async function githubApi(token, endpoint, options = {}) {
   const message = data?.message || response.statusText || "GitHub API error";
 
   if (!response.ok) {
-    if (response.status === 401) {
-      throw new AppError("INVALID_TOKEN", "Token GitHub tidak valid.", message);
-    }
-
-    if (response.status === 403) {
-      throw new AppError(
-        "INVALID_TOKEN",
-        "Token GitHub tidak punya permission yang cukup atau terkena limit.",
-        message
-      );
-    }
-
-    if (response.status === 404) {
-      throw new AppError(
-        "REPO_NOT_FOUND",
-        "Repository tidak ditemukan atau token tidak punya akses.",
-        message
-      );
-    }
-
-    if (response.status === 422) {
-      throw new AppError(
-        "REPO_NAME_USED",
-        "Nama repository sudah digunakan atau input tidak valid.",
-        message
-      );
-    }
-
-    throw new AppError(
-      "GITHUB_API_ERROR",
-      `GitHub API error: ${response.status}`,
-      message
-    );
+    if (response.status === 401) throw new AppError("INVALID_TOKEN", "Token GitHub tidak valid.", message);
+    if (response.status === 403) throw new AppError("INVALID_TOKEN", "Token GitHub tidak punya permission yang cukup atau terkena limit.", message);
+    if (response.status === 404) throw new AppError("REPO_NOT_FOUND", "Repository tidak ditemukan atau token tidak punya akses.", message);
+    if (response.status === 422) throw new AppError("REPO_NAME_USED", "Nama repository sudah digunakan atau input tidak valid.", message);
+    throw new AppError("GITHUB_API_ERROR", `GitHub API error: ${response.status}`, message);
   }
 
   return data;
 }
 
+async function readLocalConfig() {
+  try {
+    const raw = await fs.readFile(CONFIG_FILE, "utf8");
+    const config = JSON.parse(raw);
+    if (!config.username || !config.email || !config.token) return null;
+    return config;
+  } catch {
+    return null;
+  }
+}
+
+async function saveLocalConfig(account) {
+  await fs.mkdir(CONFIG_DIR, { recursive: true });
+  await fs.writeFile(
+    CONFIG_FILE,
+    JSON.stringify(
+      {
+        username: account.username,
+        email: account.email,
+        token: account.token,
+        savedAt: new Date().toISOString()
+      },
+      null,
+      2
+    ),
+    { mode: 0o600 }
+  );
+
+  try {
+    await fs.chmod(CONFIG_FILE, 0o600);
+  } catch {}
+}
+
+async function clearLocalConfig() {
+  await fs.rm(CONFIG_FILE, { force: true });
+}
+
+function maskToken(token) {
+  if (!token) return "-";
+  if (token.length <= 10) return "********";
+  return `${token.slice(0, 4)}${"*".repeat(8)}${token.slice(-4)}`;
+}
+
 async function getAccount() {
   printSection("Akun GitHub");
-  console.log(theme.gray("Token dibaca dari env kalau tersedia. Kalau kosong, input manual dan tetap aman."));
 
   const envUsername = process.env.GITHUB_USERNAME?.trim();
   const envEmail = process.env.GITHUB_EMAIL?.trim();
   const envToken = process.env.GITHUB_TOKEN?.trim();
 
-  const username =
-    envUsername ||
-    (await input({
-      message: "Username GitHub",
-      validate: validateUsername
-    }));
+  if (envUsername && envEmail && envToken) {
+    printMiniInfo([
+      `${theme.green("✓")} Login pakai environment variable`,
+      `${theme.gray("Username:")} ${theme.white.bold(envUsername)}`,
+      `${theme.gray("Email   :")} ${theme.white.bold(envEmail)}`,
+      `${theme.gray("Token   :")} ${theme.white.bold(maskToken(envToken))}`
+    ]);
+    return { username: envUsername, email: envEmail, token: envToken };
+  }
 
-  const email =
-    envEmail ||
-    (await input({
-      message: "Email GitHub",
-      validate: validateEmail
-    }));
+  const savedAccount = await readLocalConfig();
+  if (savedAccount) {
+    printMiniInfo([
+      `${theme.green("✓")} Login otomatis dari config lokal`,
+      `${theme.gray("Username:")} ${theme.white.bold(savedAccount.username)}`,
+      `${theme.gray("Email   :")} ${theme.white.bold(savedAccount.email)}`,
+      `${theme.gray("Token   :")} ${theme.white.bold(maskToken(savedAccount.token))}`,
+      ``,
+      `${theme.yellow("!")} Token tidak ditanam di repo GitHub. Token hanya tersimpan di device ini.`
+    ]);
+    return savedAccount;
+  }
 
-  const token =
-    envToken ||
-    (await password({
-      message: "GitHub Personal Access Token",
-      mask: "*",
-      validate(value) {
-        return value.trim() ? true : "Token tidak boleh kosong.";
-      }
-    }));
+  console.log(theme.gray("Login pertama kali. Data akun akan disimpan lokal supaya besok tidak input ulang."));
 
-  return {
-    username: username.trim(),
-    email: email.trim(),
-    token: token.trim()
-  };
+  const username = await input({ message: "Username GitHub", validate: validateUsername });
+  const email = await input({ message: "Email GitHub", validate: validateEmail });
+  const token = await password({
+    message: "GitHub Personal Access Token",
+    mask: "*",
+    validate(value) {
+      return value.trim() ? true : "Token tidak boleh kosong.";
+    }
+  });
+
+  return { username: username.trim(), email: email.trim(), token: token.trim() };
 }
 
 async function validateToken(token) {
-  return await githubApi(token, "/user");
+  return githubApi(token, "/user");
 }
 
 async function validateAccount(account) {
-  const githubUser = await withSpinner("Validasi akun GitHub", async () => {
-    return await validateToken(account.token);
-  });
+  const githubUser = await withSpinner("Validasi akun GitHub", async () => validateToken(account.token));
 
   if (githubUser.login.toLowerCase() !== account.username.toLowerCase()) {
     throw new AppError(
@@ -582,44 +443,103 @@ async function validateAccount(account) {
     );
   }
 
+  await saveLocalConfig(account);
+
   printMiniInfo([
     `${theme.green("✓")} Akun GitHub valid`,
     `${theme.gray("Username:")} ${theme.white.bold(githubUser.login)}`,
-    `${theme.gray("Email   :")} ${theme.white.bold(account.email)}`
+    `${theme.gray("Email   :")} ${theme.white.bold(account.email)}`,
+    `${theme.gray("Config  :")} ${theme.white.bold(CONFIG_FILE)}`
   ]);
 
   return githubUser;
 }
 
 async function getRepository(token, owner, repo) {
-  return await githubApi(token, `/repos/${owner}/${repo}`);
+  return githubApi(token, `/repos/${owner}/${repo}`);
 }
 
 async function createRepository(token, repoName) {
-  return await githubApi(token, "/user/repos", {
+  return githubApi(token, "/user/repos", {
     method: "POST",
-    body: {
-      name: repoName,
-      private: NEW_REPO_PRIVATE,
-      auto_init: false
-    }
+    body: { name: repoName, private: NEW_REPO_PRIVATE, auto_init: false }
   });
 }
 
-async function cleanDirectoryExceptGit(repoDir) {
-  const entries = await fs.readdir(repoDir, {
-    withFileTypes: true
-  });
+async function listRepositories(token, keyword = "") {
+  const repos = [];
+  const search = keyword.trim().toLowerCase();
 
+  for (let page = 1; page <= 5; page++) {
+    const batch = await githubApi(
+      token,
+      `/user/repos?per_page=100&page=${page}&sort=updated&direction=desc&affiliation=owner,collaborator,organization_member`
+    );
+
+    if (!Array.isArray(batch) || !batch.length) break;
+    repos.push(...batch);
+    if (batch.length < 100) break;
+  }
+
+  if (!search) return repos;
+
+  return repos.filter((repo) => {
+    const fullName = repo.full_name?.toLowerCase() || "";
+    const name = repo.name?.toLowerCase() || "";
+    const desc = repo.description?.toLowerCase() || "";
+    return fullName.includes(search) || name.includes(search) || desc.includes(search);
+  });
+}
+
+async function chooseRepository(account) {
+  printSection("Pilih Repository Target");
+
+  let keyword = "";
+
+  while (true) {
+    const repos = await withSpinner(
+      keyword ? `Ambil list repo GitHub dengan keyword: ${keyword}` : "Ambil list repo GitHub terbaru",
+      async () => listRepositories(account.token, keyword)
+    );
+
+    if (!repos.length) {
+      console.log(theme.yellow("Tidak ada repo yang cocok."));
+      keyword = await input({ message: "Masukkan keyword repo lain", validate: (value) => (value.trim() ? true : "Keyword wajib diisi.") });
+      continue;
+    }
+
+    const shownRepos = repos.slice(0, 30);
+    const choice = await select({
+      message: keyword ? `Pilih repo hasil pencarian "${keyword}"` : "Pilih repo yang mau diupdate",
+      choices: [
+        ...shownRepos.map((repo) => ({
+          name: `${repo.full_name}${repo.private ? " 🔒" : " 🌐"}`,
+          value: repo.full_name,
+          description: repo.description || `Updated: ${repo.updated_at || "-"}`
+        })),
+        { name: "Cari repo pakai keyword lain", value: "__search", description: "Gunakan ini kalau repo belum muncul di list." },
+        { name: "Batal", value: "__cancel", description: "Kembali ke menu utama." }
+      ]
+    });
+
+    if (choice === "__cancel") return null;
+
+    if (choice === "__search") {
+      keyword = await input({ message: "Keyword nama repo", validate: (value) => (value.trim() ? true : "Keyword wajib diisi.") });
+      continue;
+    }
+
+    const selected = repos.find((repo) => repo.full_name === choice);
+    if (!selected) throw new AppError("REPO_NOT_FOUND", "Repository pilihan tidak ditemukan di list lokal.", choice);
+    return selected;
+  }
+}
+
+async function cleanDirectoryExceptGit(repoDir) {
+  const entries = await fs.readdir(repoDir, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.name === ".git") continue;
-
-    const target = path.join(repoDir, entry.name);
-
-    await fs.rm(target, {
-      recursive: true,
-      force: true
-    });
+    await fs.rm(path.join(repoDir, entry.name), { recursive: true, force: true });
   }
 }
 
@@ -627,19 +547,15 @@ async function copyProjectIntoRepo(projectPath, repoDir) {
   const stat = await ensureProjectPath(projectPath);
 
   if (stat.isFile()) {
-    const targetFile = path.join(repoDir, path.basename(projectPath));
-    await fs.copyFile(projectPath, targetFile);
+    await fs.copyFile(projectPath, path.join(repoDir, path.basename(projectPath)));
     return;
   }
 
   const items = await fs.readdir(projectPath);
-
   for (const item of items) {
     if (item === ".git") continue;
-
     const source = path.join(projectPath, item);
     const target = path.join(repoDir, item);
-
     await fs.cp(source, target, {
       recursive: true,
       filter(sourcePath) {
@@ -650,28 +566,14 @@ async function copyProjectIntoRepo(projectPath, repoDir) {
 }
 
 async function setupGitIdentity(repoDir, account) {
-  await runGit(["config", "user.name", account.username], {
-    cwd: repoDir
-  });
-
-  await runGit(["config", "user.email", account.email], {
-    cwd: repoDir
-  });
+  await runGit(["config", "user.name", account.username], { cwd: repoDir });
+  await runGit(["config", "user.email", account.email], { cwd: repoDir });
 }
 
 async function commitAndPush(repoDir, token, branch, message) {
-  await runGit(["add", "-A"], {
-    cwd: repoDir
-  });
-
-  await runGit(["commit", "--allow-empty", "-m", message], {
-    cwd: repoDir
-  });
-
-  await runGit(["push", "origin", `HEAD:${branch}`], {
-    cwd: repoDir,
-    token
-  });
+  await runGit(["add", "-A"], { cwd: repoDir });
+  await runGit(["commit", "--allow-empty", "-m", message], { cwd: repoDir });
+  await runGit(["push", "origin", `HEAD:${branch}`], { cwd: repoDir, token });
 }
 
 async function updateExistingRepository(account) {
@@ -679,17 +581,8 @@ async function updateExistingRepository(account) {
 
   printSection("Update Repo Lama");
 
-  const repoUrl = await input({
-    message: "URL repository GitHub yang sudah ada",
-    validate(value) {
-      try {
-        parseGitHubRepoUrl(value);
-        return true;
-      } catch (error) {
-        return error.detail || error.message;
-      }
-    }
-  });
+  const repository = await chooseRepository(account);
+  if (!repository) return;
 
   printProjectPathHelp();
 
@@ -702,13 +595,6 @@ async function updateExistingRepository(account) {
 
   const projectSource = await prepareProjectSource(projectInput);
   const projectPath = projectSource.sourcePath;
-
-  const { owner, repo } = parseGitHubRepoUrl(repoUrl);
-
-  const repository = await withSpinner("Cek repository target", async () => {
-    return await getRepository(token, owner, repo);
-  });
-
   const defaultBranch = repository.default_branch || DEFAULT_NEW_REPO_BRANCH;
 
   console.log(
@@ -722,11 +608,7 @@ async function updateExistingRepository(account) {
         `${theme.red("Semua file lama di repository target akan dihapus.")}\n` +
         `${theme.green("File lokal kamu tidak akan dihapus.")}\n\n` +
         `Lanjut hanya kalau kamu yakin repo target sudah benar.`,
-      {
-        padding: 1,
-        borderStyle: "double",
-        borderColor: "yellow"
-      }
+      { padding: 1, borderStyle: "double", borderColor: "yellow" }
     )
   );
 
@@ -739,6 +621,7 @@ async function updateExistingRepository(account) {
 
   if (confirmation.trim() !== "YA UPDATE REPO") {
     console.log(theme.red("\n✕ Proses dibatalkan. Tidak ada file yang dihapus."));
+    await projectSource.cleanup();
     return;
   }
 
@@ -747,46 +630,26 @@ async function updateExistingRepository(account) {
 
   try {
     await withSpinner("Clone repository target", async () => {
-      await runGit(
-        ["clone", "--depth", "1", "--branch", defaultBranch, repository.clone_url, repoDir],
-        { token }
-      );
+      await runGit(["clone", "--depth", "1", "--branch", defaultBranch, repository.clone_url, repoDir], { token });
     });
 
-    await withSpinner("Bersihkan isi lama di clone repo", async () => {
-      await cleanDirectoryExceptGit(repoDir);
-    });
-
-    await withSpinner("Copy project baru", async () => {
-      await copyProjectIntoRepo(projectPath, repoDir);
-    });
-
-    await withSpinner("Set identitas commit", async () => {
-      await setupGitIdentity(repoDir, account);
-    });
-
-    await withSpinner("Commit dan push ke GitHub", async () => {
-      await commitAndPush(repoDir, token, defaultBranch, "Update project deployment");
-    });
+    await withSpinner("Bersihkan isi lama di clone repo", async () => cleanDirectoryExceptGit(repoDir));
+    await withSpinner("Copy project baru", async () => copyProjectIntoRepo(projectPath, repoDir));
+    await withSpinner("Set identitas commit", async () => setupGitIdentity(repoDir, account));
+    await withSpinner("Commit dan push ke GitHub", async () => commitAndPush(repoDir, token, defaultBranch, "Update project deployment"));
 
     console.log(
       boxen(
         `${theme.green.bold("DONE — Repo lama berhasil diupdate!")}\n\n` +
-          `${theme.white("Repo:")} ${repository.html_url}\n` +
-          `${theme.white("Branch:")} ${defaultBranch}`,
-        {
-          padding: 1,
-          borderStyle: "round",
-          borderColor: "green"
-        }
+          `${theme.white("Repo  :")} ${repository.html_url}\n` +
+          `${theme.white("Branch:")} ${defaultBranch}\n\n` +
+          `${theme.gray("Tools tidak keluar otomatis. Kamu akan balik ke menu utama.")}`,
+        { padding: 1, borderStyle: "round", borderColor: "green" }
       )
     );
   } finally {
     await projectSource.cleanup();
-    await fs.rm(tempRoot, {
-      recursive: true,
-      force: true
-    });
+    await fs.rm(tempRoot, { recursive: true, force: true });
   }
 }
 
@@ -795,10 +658,7 @@ async function deployNewRepository(account) {
 
   printSection("Deploy Repo Baru");
 
-  const repoName = await input({
-    message: "Nama repo GitHub baru / nama website",
-    validate: validateRepoName
-  });
+  const repoName = await input({ message: "Nama repo GitHub baru / nama website", validate: validateRepoName });
 
   printProjectPathHelp();
 
@@ -819,17 +679,12 @@ async function deployNewRepository(account) {
     `${theme.gray("Upload  :")} ${projectPath}`
   ]);
 
-  const repository = await withSpinner("Buat repository GitHub baru", async () => {
-    return await createRepository(token, repoName.trim());
-  });
-
+  const repository = await withSpinner("Buat repository GitHub baru", async () => createRepository(token, repoName.trim()));
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "alizz-deploy-new-"));
   const repoDir = path.join(tempRoot, "repo");
 
   try {
-    await fs.mkdir(repoDir, {
-      recursive: true
-    });
+    await fs.mkdir(repoDir, { recursive: true });
 
     await withSpinner("Setup Git lokal sementara", async () => {
       await runGit(["init"], { cwd: repoDir });
@@ -837,36 +692,22 @@ async function deployNewRepository(account) {
       await runGit(["remote", "add", "origin", repository.clone_url], { cwd: repoDir });
     });
 
-    await withSpinner("Copy project ke repo baru", async () => {
-      await copyProjectIntoRepo(projectPath, repoDir);
-    });
-
-    await withSpinner("Set identitas commit", async () => {
-      await setupGitIdentity(repoDir, account);
-    });
-
-    await withSpinner("Commit dan push ke GitHub", async () => {
-      await commitAndPush(repoDir, token, DEFAULT_NEW_REPO_BRANCH, "Initial project deployment");
-    });
+    await withSpinner("Copy project ke repo baru", async () => copyProjectIntoRepo(projectPath, repoDir));
+    await withSpinner("Set identitas commit", async () => setupGitIdentity(repoDir, account));
+    await withSpinner("Commit dan push ke GitHub", async () => commitAndPush(repoDir, token, DEFAULT_NEW_REPO_BRANCH, "Initial project deployment"));
 
     console.log(
       boxen(
         `${theme.green.bold("DONE — Repo baru berhasil dibuat!")}\n\n` +
           `${theme.white("Repo baru:")} ${repository.html_url}\n` +
-          `${theme.white("Branch   :")} ${DEFAULT_NEW_REPO_BRANCH}`,
-        {
-          padding: 1,
-          borderStyle: "round",
-          borderColor: "green"
-        }
+          `${theme.white("Branch   :")} ${DEFAULT_NEW_REPO_BRANCH}\n\n` +
+          `${theme.gray("Tools tidak keluar otomatis. Kamu akan balik ke menu utama.")}`,
+        { padding: 1, borderStyle: "round", borderColor: "green" }
       )
     );
   } finally {
     await projectSource.cleanup();
-    await fs.rm(tempRoot, {
-      recursive: true,
-      force: true
-    });
+    await fs.rm(tempRoot, { recursive: true, force: true });
   }
 }
 
@@ -885,60 +726,81 @@ function printFriendlyError(error) {
           `${theme.white(error.message)}\n\n` +
           `${theme.gray("Kode:")} ${error.code}` +
           (error.detail ? `\n\n${theme.gray("Detail:")}\n${error.detail}` : ""),
-        {
-          padding: 1,
-          borderStyle: "round",
-          borderColor: "red"
-        }
+        { padding: 1, borderStyle: "round", borderColor: "red" }
       )
     );
     return;
   }
 
-  console.error(
-    boxen(`${theme.red.bold("ERROR")}\n\nTerjadi error tidak dikenal.\n${String(error)}`, {
-      padding: 1,
-      borderStyle: "round",
-      borderColor: "red"
-    })
-  );
+  console.error(boxen(`${theme.red.bold("ERROR")}\n\nTerjadi error tidak dikenal.\n${String(error)}`, { padding: 1, borderStyle: "round", borderColor: "red" }));
+}
+
+async function chooseMode() {
+  printSection("Pilih Mode");
+
+  return select({
+    message: "Mau ngapain hari ini?",
+    choices: [
+      {
+        name: "Update repo lama — pilih repo dari list GitHub",
+        value: "update",
+        description: "Tidak perlu paste link repo. Tinggal pilih repo, lalu input folder/ZIP."
+      },
+      {
+        name: "Deploy repo baru — upload folder atau ZIP project",
+        value: "new",
+        description: "Tools membuat repo baru, extract ZIP kalau perlu, lalu upload project."
+      },
+      {
+        name: "Reset login tersimpan",
+        value: "reset-login",
+        description: "Hapus config lokal supaya bisa login dengan token lain."
+      },
+      {
+        name: "Keluar",
+        value: "exit",
+        description: "Tutup GitShip."
+      }
+    ]
+  });
 }
 
 async function main() {
   try {
     printBanner();
-
     await ensureGitInstalled();
 
-    const account = await getAccount();
+    let account = await getAccount();
     await validateAccount(account);
 
-    printSection("Pilih Mode");
+    while (true) {
+      const mode = await chooseMode();
 
-    const mode = await select({
-      message: "Mau ngapain hari ini?",
-      choices: [
-        {
-          name: "Update repo lama — upload folder atau ZIP project",
-          value: "update",
-          description: "Repo lama tetap sama, isi filenya diganti project baru."
-        },
-        {
-          name: "Deploy repo baru — upload folder atau ZIP project",
-          value: "new",
-          description: "Tools membuat repo baru, extract ZIP kalau perlu, lalu upload project."
+      if (mode === "update") {
+        await updateExistingRepository(account);
+        continue;
+      }
+
+      if (mode === "new") {
+        await deployNewRepository(account);
+        continue;
+      }
+
+      if (mode === "reset-login") {
+        const ok = await confirm({ message: "Yakin hapus login tersimpan di device ini?", default: false });
+        if (ok) {
+          await clearLocalConfig();
+          console.log(theme.green("✓ Login tersimpan berhasil dihapus."));
+          account = await getAccount();
+          await validateAccount(account);
         }
-      ]
-    });
+        continue;
+      }
 
-    if (mode === "update") {
-      await updateExistingRepository(account);
-      return;
-    }
-
-    if (mode === "new") {
-      await deployNewRepository(account);
-      return;
+      if (mode === "exit") {
+        console.log(theme.green("Selesai. Sampai jumpa lagi bos."));
+        return;
+      }
     }
   } catch (error) {
     printFriendlyError(error);
