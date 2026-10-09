@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node bin/gitship.js",
     "check": "node --check bin/gitship.js && for f in $(find src -name \"*.js\"); do node --check $f || exit 1; done",
-    "test": "node --test test/*.test.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
     "pack:check": "npm pack --dry-run"
   },
   "keywords": [
