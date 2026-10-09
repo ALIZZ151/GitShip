@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.0-rc.2 — Auto-update instalasi git clone
+- Pemeriksaan dan pembaruan aman untuk Git clone dari ALIZZ151/GitShip di awal sesi interaktif.
+- Perintah `gitship self-update --check` dan `gitship self-update`.
+- Fast-forward saja, lewati perubahan lokal, offline tidak memblokir menu, cegah loop restart.
+
+
 ## 3.0.0-rc.1
 Perubahan perilaku disengaja:
 - Token environment tidak lagi tersimpan otomatis (login interaktif menawarkan simpan).

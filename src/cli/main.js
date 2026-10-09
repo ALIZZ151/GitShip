@@ -10,7 +10,7 @@ const OPTIONS = {
   source: { type: "string" }, new: { type: "string" }, repo: { type: "string" }, branch: { type: "string" },
   mode: { type: "string" }, visibility: { type: "string" }, message: { type: "string", short: "m" },
   "dry-run": { type: "boolean" }, yes: { type: "boolean" }, "confirm-replace": { type: "string" },
-  "create-branch": { type: "boolean" }, remember: { type: "boolean" }, network: { type: "boolean" }
+  "create-branch": { type: "boolean" }, remember: { type: "boolean" }, network: { type: "boolean" }, check: { type: "boolean" }
 };
 
 export async function readVersion() {
@@ -33,8 +33,28 @@ export async function run(argv, deps = {}) {
     const [cmd, sub] = positionals;
     if (!cmd) {
       if (!d.isTTY) throw new AppError("USAGE", "Tanpa argumen butuh terminal interaktif. Lihat --help.", "", EXIT.USAGE);
+      if (d.env.GITSHIP_JUST_UPDATED !== "1") {
+        const { selfUpdate, restartCLI } = await import("../self-update.js");
+        const result = await (d.selfUpdater ?? selfUpdate)({ env: d.env, respectDisable: true });
+        if (result.status === "updated") {
+          d.stderr.write(`${result.message}\n`);
+          return await (d.restartCLI ?? restartCLI)(d.env);
+        }
+        if (result.status === "install-failed") {
+          d.stderr.write(`${result.message}\n`);
+          return EXIT.FAILED;
+        }
+        if (["skipped", "offline"].includes(result.status)) d.stderr.write(`Auto-update: ${result.message}\n`);
+      }
       const { runMenu } = await import("./menu.js");
       return await runMenu(d);
+    }
+    if (cmd === "self-update") {
+      if (sub || v.yes || v.dryRun) throw new AppError("USAGE", "Gunakan: gitship self-update [--check] [--json]", "", EXIT.USAGE);
+      const { selfUpdate } = await import("../self-update.js");
+      const result = await (d.selfUpdater ?? selfUpdate)({ env: d.env, checkOnly: !!v.check });
+      out(result, result.message);
+      return result.status === "offline" ? EXIT.NETWORK : result.status === "install-failed" ? EXIT.FAILED : EXIT.OK;
     }
     if (cmd === "doctor") return await doctorCommand(v, d, out);
     if (cmd === "auth") { await authCommand(sub, v, d, out); return EXIT.OK; }

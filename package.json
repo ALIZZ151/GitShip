@@ -1,6 +1,6 @@
 {
   "name": "alizz-gitship",
-  "version": "3.0.0-rc.1",
+  "version": "3.0.0-rc.2",
   "description": "CLI untuk upload project (folder, ZIP, file) ke GitHub dengan preview dan mode replace/overlay.",
   "type": "module",
   "main": "src/cli/main.js",

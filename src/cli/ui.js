@@ -20,12 +20,15 @@ Pakai:
   gitship                         menu interaktif
   gitship --help | --version
   gitship doctor [--network] [--json]
+  gitship self-update [--check] [--json]   update clone GitShip resmi
   gitship auth status | login | logout
   gitship upload --source <path> (--new <nama> --visibility public|private | --repo owner/repo)
                  [--branch b] [--mode replace|overlay] [--message teks] [--create-branch]
                  [--dry-run] [--yes] [--confirm-replace owner/repo@branch] [--json]
 
 Catatan:
+  gitship interaktif akan memperbarui instalasi git clone yang clean secara otomatis.
+  Set GITSHIP_AUTO_UPDATE=0 untuk menonaktifkan update.
   repo baru nonaktif-interaktif wajib --visibility dan --yes (kecuali --dry-run).
   update repo wajib --mode; replace wajib --confirm-replace owner/repo@branch (persis).
   --yes TIDAK mengizinkan penghapusan. Tidak ada --force.

@@ -10,6 +10,17 @@ npm install            # dari folder proyek ini
 node bin/gitship.js doctor
 npm link               # opsional, agar perintah `gitship` tersedia
 ```
+### Auto-update untuk instalasi `git clone`
+Saat menjalankan `gitship` dalam terminal interaktif, GitShip akan mengecek GitHub (`ALIZZ151/GitShip`, branch `main`). Jika ada commit baru dan **file Git terpantau bersih**, GitShip melakukan fast-forward, memasang dependency (`npm install` tanpa lifecycle scripts), lalu membuka ulang CLI. Perubahan lokal tidak di-reset, tidak di-force-push, dan jika offline program tetap bisa dijalankan. Update dapat menambah waktu startup saat koneksi lambat (maksimum 9 detik untuk fetch).
+
+```
+gitship self-update --check   # cek tanpa merge/install
+gitship self-update           # perbarui langsung dari git clone
+GITSHIP_AUTO_UPDATE=0 gitship # buka tanpa cek update
+```
+
+Hanya berlaku untuk `git clone` + `npm link`. Instalasi global via npm / paket `.tgz` tidak diubah secara otomatis. Jika update telah diunduh tetapi pemasangan dependency gagal, masuk ke folder GitShip dan jalankan `npm install`. Jika masih berada di versi lama, perbarui pertama kali secara manual: `cd ~/GitShip && git pull --ff-only origin main && npm install && npm link`. Perintah `gitship --version` dan mode JSON **tidak** menjalankan update otomatis.
+
 Status uji: lihat `docs/STATUS.md` (Node 24, Windows, macOS, Termux, dan GitHub asli belum diuji).
 
 ## Pemakaian
